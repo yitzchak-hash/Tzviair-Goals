@@ -1,0 +1,15 @@
+{
+  "name": "tzviair-goals-public",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "npm --prefix site run vercel-build",
+    "test": "node --test api/goals.test.mjs"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "dependencies": {
+    "@vercel/blob": "^2.6.1"
+  }
+}

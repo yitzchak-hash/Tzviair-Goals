@@ -1,0 +1,10 @@
+WorkLog/
+node_modules/
+.env.local
+site/.git/
+site/.next/
+site/dist/
+site/node_modules/
+site/.npm-cache/
+site/.sites-dev.*.log
+site/work/

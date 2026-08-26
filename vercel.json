@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "npm ci && npm --prefix site ci",
+  "buildCommand": "npm --prefix site run vercel-build",
+  "outputDirectory": "site/out",
+  "functions": {
+    "api/**/*.mjs": {
+      "maxDuration": 10
+    }
+  }
+}
