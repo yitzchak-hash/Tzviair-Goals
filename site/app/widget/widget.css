@@ -1,0 +1,339 @@
+/* Embeddable goals widget (/widget). Scoped with .gw- / .goals-widget-root so
+   nothing here changes the main board's styling. Inherits the brand tokens and
+   fonts defined in globals.css. */
+
+html.goals-widget-root,
+html.goals-widget-root body {
+  min-height: 0;
+  background: var(--background);
+}
+
+html.goals-widget-transparent,
+html.goals-widget-transparent body {
+  background: transparent;
+}
+
+.gw-shell {
+  padding: 0.75rem;
+  color: var(--ink);
+  font-family: var(--font-heebo), "Segoe UI", sans-serif;
+}
+
+.gw-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.7rem;
+}
+
+.gw-logo {
+  width: 58px;
+  height: auto;
+  flex: 0 0 auto;
+}
+
+.gw-board-label {
+  font-family: var(--font-rubik), "Segoe UI", sans-serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--navy);
+  letter-spacing: 0.01em;
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gw-sync i {
+  display: block;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.gw-sync-saved i {
+  background: #23b26d;
+}
+
+.gw-sync-offline i {
+  background: var(--orange);
+}
+
+.gw-sync-syncing i,
+.gw-sync-connecting i {
+  background: var(--cyan);
+  animation: gw-blink 1.1s ease-in-out infinite;
+}
+
+.gw-open-board {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--cyan-dark);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.gw-open-board:hover {
+  text-decoration: underline;
+}
+
+.gw-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1.1rem;
+  padding: 0.65rem 0.85rem;
+  margin-bottom: 0.7rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 8px 18px rgba(8, 43, 102, 0.06);
+}
+
+.gw-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.gw-progress strong {
+  font-family: var(--font-rubik), "Segoe UI", sans-serif;
+  font-size: 1.35rem;
+  color: var(--navy);
+  line-height: 1;
+}
+
+.gw-progress > span {
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.gw-progress-track {
+  flex: 1 1 90px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(18, 63, 130, 0.12);
+  overflow: hidden;
+}
+
+.gw-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--cyan) 0%, var(--gold) 100%);
+  transition: width 0.4s ease;
+}
+
+.gw-summary-stats {
+  display: flex;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.gw-stat {
+  font-size: 0.76rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.gw-stat strong {
+  font-family: var(--font-rubik), "Segoe UI", sans-serif;
+  font-size: 0.95rem;
+  margin-inline-end: 0.2rem;
+}
+
+.gw-stat-complete strong {
+  color: #1d9d61;
+}
+
+.gw-stat-open strong {
+  color: var(--cyan-dark);
+}
+
+.gw-stat-waiting strong {
+  color: var(--navy);
+}
+
+.gw-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+  gap: 0.6rem;
+}
+
+.gw-view-dashboard .gw-grid {
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.5rem;
+}
+
+.gw-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.65rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 8px 18px rgba(8, 43, 102, 0.06);
+  overflow: hidden;
+}
+
+.gw-tile::before {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  inline-size: 100%;
+  block-size: 4px;
+  content: "";
+  background: rgba(18, 63, 130, 0.16);
+}
+
+.gw-in-progress::before {
+  background: linear-gradient(90deg, var(--cyan) 0%, var(--cyan-dark) 100%);
+}
+
+.gw-completed::before {
+  background: linear-gradient(90deg, var(--gold) 0%, var(--orange) 100%);
+}
+
+.gw-completed {
+  background: linear-gradient(180deg, #fffdf4 0%, var(--surface) 68%);
+}
+
+.gw-tile-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.gw-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.gw-in-progress .gw-state {
+  color: var(--cyan-dark);
+}
+
+.gw-completed .gw-state {
+  color: #1d9d61;
+}
+
+.gw-check {
+  font-style: normal;
+  font-weight: 700;
+}
+
+.gw-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--cyan);
+  animation: gw-blink 1.1s ease-in-out infinite;
+}
+
+.gw-timer {
+  font-family: var(--font-rubik), "Segoe UI", monospace;
+  font-size: 0.82rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--navy);
+}
+
+.gw-in-progress .gw-timer {
+  color: var(--cyan-dark);
+}
+
+.gw-title {
+  margin: 0;
+  font-family: var(--font-rubik), "Segoe UI", sans-serif;
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--ink);
+}
+
+.gw-view-dashboard .gw-title {
+  font-size: 0.84rem;
+}
+
+.gw-target {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.gw-target-over {
+  color: var(--orange);
+  font-weight: 600;
+}
+
+.gw-actions {
+  margin-block-start: 0.15rem;
+}
+
+.gw-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.32rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #ffffff;
+  background: var(--navy);
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.gw-start {
+  background: linear-gradient(120deg, var(--cyan) 0%, var(--cyan-dark) 100%);
+}
+
+.gw-finish {
+  background: linear-gradient(120deg, var(--gold) 0%, var(--orange) 100%);
+}
+
+.gw-button:hover {
+  filter: brightness(1.06);
+}
+
+.gw-empty,
+.gw-more {
+  margin: 0.3rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+@keyframes gw-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gw-pulse,
+  .gw-sync-syncing i,
+  .gw-sync-connecting i {
+    animation: none;
+  }
+
+  .gw-progress-track span {
+    transition: none;
+  }
+}
