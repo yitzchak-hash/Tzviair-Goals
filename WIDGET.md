@@ -107,6 +107,9 @@ before trusting a message.
   start/finish writes go through the same validation and last-write-wins
   storage as the board.
 - **Read-only by default.** Without `interactive`, the widget never writes.
+- **Paused goals.** A goal paused on the main board shows as "מושהה"/"Paused"
+  with a frozen timer; in `interactive` mode tiles offer pause/resume
+  alongside start/finish.
 - **Preview testing.** On a Vercel preview deployment, append `cloud-test=1`
   (or pass `cloudTest: true` to `mount`) to use the isolated preview test
   blob instead of production data, same as the full board.
