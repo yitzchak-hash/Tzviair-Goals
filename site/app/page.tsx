@@ -110,6 +110,17 @@ const translations = {
     footer: "מכוונים גבוה, מסיימים חזק",
     celebration: "כל הכבוד! עוד יעד הושלם",
     completedBeforeTimer: "הושלם לפני הוספת מדידת הזמן",
+    pauseGoal: "השהה",
+    resumeGoal: "המשך עבודה",
+    pausedLabel: "מושהה",
+    editGoalTitle: "עריכת יעד",
+    editGoalDescription: "עריכה מלאה של היעד — שם, זמן יעד וזמן עבודה שנצבר.",
+    workTimeLabel: "זמן עבודה שנצבר",
+    startTimeLabel: "העבודה כבר התחילה בשעה (לא חובה)",
+    printCard: "הדפסת כרטיס",
+    printCardFor: "הדפסת כרטיס עבור",
+    goalCompletedCard: "יעד הושלם",
+    dragHint: "לחיצה ארוכה וגרירה לשינוי הסדר",
   },
   en: {
     languageButton: "עברית",
@@ -175,6 +186,18 @@ const translations = {
     footer: "Aim high. Finish strong.",
     celebration: "Great work! Another goal completed",
     completedBeforeTimer: "Completed before time tracking was added",
+    pauseGoal: "Pause",
+    resumeGoal: "Resume",
+    pausedLabel: "Paused",
+    editGoalTitle: "Edit goal",
+    editGoalDescription:
+      "Fully edit this goal — name, target time, and accumulated work time.",
+    workTimeLabel: "Accumulated work time",
+    startTimeLabel: "Work already started at (optional)",
+    printCard: "Print card",
+    printCardFor: "Print a card for",
+    goalCompletedCard: "Goal completed",
+    dragHint: "Press and hold, then drag to reorder",
   },
 } as const;
 
@@ -196,6 +219,20 @@ type Celebration = {
   id: number;
 };
 
+type DragSection = "active" | "closed";
+
+type DragState = {
+  goalId: string;
+  section: DragSection;
+  order: string[];
+  width: number;
+  height: number;
+  x: number;
+  y: number;
+  offsetX: number;
+  offsetY: number;
+};
+
 type CloudState = {
   version: number;
   goals: Goal[] | null;
@@ -204,6 +241,28 @@ type CloudState = {
 
 function currentTimestamp() {
   return Date.now();
+}
+
+// A paused goal keeps the in-progress status with no running segment, so
+// older clients and the API treat it as a valid frozen timer.
+function isPausedGoal(goal: Goal) {
+  return goal.status === "in-progress" && goal.startedAt === null;
+}
+
+// "HH:MM" today, clamped to now so a future hour can't create negative time.
+function todayAtTime(value: string) {
+  const [hours, minutes] = value.split(":").map((part) => Number.parseInt(part, 10));
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  const date = new Date();
+  date.setHours(hours, minutes, 0, 0);
+  return Math.min(date.getTime(), currentTimestamp());
+}
+
+function durationFromInputs(hours: string, minutes: string) {
+  const totalMinutes =
+    Math.max(0, Number.parseInt(hours, 10) || 0) * 60 +
+    Math.max(0, Number.parseInt(minutes, 10) || 0);
+  return totalMinutes * 60_000;
 }
 
 function createInitialGoals(legacyCompleted?: boolean[]): Goal[] {
@@ -404,6 +463,30 @@ export default function Home() {
   const [now, setNow] = useState(() => Date.now());
   const [ready, setReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("connecting");
+  const [newGoalStartTime, setNewGoalStartTime] = useState("");
+  const [cardEditor, setCardEditor] = useState<{
+    goalId: string;
+    title: string;
+    targetHours: string;
+    targetMinutes: string;
+    workHours: string;
+    workMinutes: string;
+    initialWork: string;
+  } | null>(null);
+  const [printGoal, setPrintGoal] = useState<Goal | null>(null);
+  const [drag, setDrag] = useState<DragState | null>(null);
+  const printAutoRef = useRef(false);
+  const dragRef = useRef<DragState | null>(null);
+  const holdRef = useRef<{
+    timer: number;
+    goalId: string;
+    section: DragSection;
+    startX: number;
+    startY: number;
+  } | null>(null);
+  const slotCentersRef = useRef<{ x: number; y: number }[]>([]);
+  const cardElsRef = useRef(new Map<string, HTMLElement>());
+  const suppressClickUntilRef = useRef(0);
   const goalsRef = useRef(goals);
   const hadStoredGoalsRef = useRef(false);
   const migrationAttemptedRef = useRef(false);
@@ -569,13 +652,196 @@ export default function Home() {
     };
   }, [flushPendingSave, ready]);
 
-  const hasRunningTimer = goals.some((goal) => goal.status === "in-progress");
+  const hasRunningTimer = goals.some(
+    (goal) => goal.status === "in-progress" && goal.startedAt !== null,
+  );
 
   useEffect(() => {
     if (!hasRunningTimer) return;
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(interval);
   }, [hasRunningTimer]);
+
+  const [gestureActive, setGestureActive] = useState(false);
+
+  const beginDrag = useCallback(
+    (goalId: string, section: DragSection, clientX: number, clientY: number) => {
+      const el = cardElsRef.current.get(goalId);
+      if (!el) return;
+
+      const order = goalsRef.current
+        .filter((goal) =>
+          section === "closed"
+            ? goal.status === "completed"
+            : goal.status !== "completed",
+        )
+        .map((goal) => goal.id);
+      // Slot geometry is captured once; the placeholder keeps the grid
+      // layout stable while the ghost follows the pointer.
+      slotCentersRef.current = order.map((id) => {
+        const slot = cardElsRef.current.get(id)?.getBoundingClientRect();
+        return slot
+          ? { x: slot.left + slot.width / 2, y: slot.top + slot.height / 2 }
+          : { x: 0, y: 0 };
+      });
+
+      const rect = el.getBoundingClientRect();
+      const state: DragState = {
+        goalId,
+        section,
+        order,
+        width: rect.width,
+        height: rect.height,
+        x: rect.left,
+        y: rect.top,
+        offsetX: clientX - rect.left,
+        offsetY: clientY - rect.top,
+      };
+      dragRef.current = state;
+      setDrag(state);
+      document.body.classList.add("dragging-goal");
+    },
+    [],
+  );
+
+  const finishDrag = useCallback(
+    (commit: boolean) => {
+      const state = dragRef.current;
+      dragRef.current = null;
+      document.body.classList.remove("dragging-goal");
+      if (state) {
+        suppressClickUntilRef.current = currentTimestamp() + 400;
+        if (commit) {
+          const goalsNow = goalsRef.current;
+          const inSection = (goal: Goal) =>
+            state.section === "closed"
+              ? goal.status === "completed"
+              : goal.status !== "completed";
+          const slots = goalsNow
+            .map((goal, index) => (inSection(goal) ? index : -1))
+            .filter((index) => index >= 0);
+          const byId = new Map(goalsNow.map((goal) => [goal.id, goal]));
+          const next = [...goalsNow];
+          state.order.forEach((id, position) => {
+            const goal = byId.get(id);
+            if (goal && position < slots.length) next[slots[position]] = goal;
+          });
+          if (next.some((goal, index) => goal.id !== goalsNow[index].id)) {
+            applySharedGoals(next);
+          }
+        }
+      }
+      setDrag(null);
+    },
+    [applySharedGoals],
+  );
+
+  useEffect(() => {
+    if (!gestureActive) return;
+
+    const handleMove = (event: PointerEvent) => {
+      const state = dragRef.current;
+      if (!state) {
+        const hold = holdRef.current;
+        if (
+          hold &&
+          Math.hypot(event.clientX - hold.startX, event.clientY - hold.startY) >
+            10
+        ) {
+          window.clearTimeout(hold.timer);
+          holdRef.current = null;
+          setGestureActive(false);
+        }
+        return;
+      }
+
+      event.preventDefault();
+      const nearest = slotCentersRef.current.reduce(
+        (best, center, index) => {
+          const distance = Math.hypot(
+            event.clientX - center.x,
+            event.clientY - center.y,
+          );
+          return distance < best.distance ? { index, distance } : best;
+        },
+        { index: -1, distance: Number.POSITIVE_INFINITY },
+      ).index;
+
+      let order = state.order;
+      const from = order.indexOf(state.goalId);
+      if (nearest >= 0 && nearest !== from) {
+        order = [...order];
+        order.splice(from, 1);
+        order.splice(nearest, 0, state.goalId);
+      }
+      const nextState = {
+        ...state,
+        order,
+        x: event.clientX - state.offsetX,
+        y: event.clientY - state.offsetY,
+      };
+      dragRef.current = nextState;
+      setDrag(nextState);
+    };
+
+    const handleUp = (event: PointerEvent) => {
+      if (holdRef.current) {
+        window.clearTimeout(holdRef.current.timer);
+        holdRef.current = null;
+      }
+      if (dragRef.current) finishDrag(event.type === "pointerup");
+      setGestureActive(false);
+    };
+
+    window.addEventListener("pointermove", handleMove, { passive: false });
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
+    };
+  }, [gestureActive, finishDrag]);
+
+  useEffect(() => {
+    if (!drag) return;
+    const cancelOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") finishDrag(false);
+    };
+    window.addEventListener("keydown", cancelOnEscape);
+    return () => window.removeEventListener("keydown", cancelOnEscape);
+  }, [drag, finishDrag]);
+
+  function handleCardPointerDown(
+    event: React.PointerEvent,
+    goal: Goal,
+    section: DragSection,
+  ) {
+    if (dragRef.current || holdRef.current) return;
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if ((event.target as HTMLElement).closest("button, a, input, form")) return;
+
+    const { clientX, clientY } = event;
+    holdRef.current = {
+      goalId: goal.id,
+      section,
+      startX: clientX,
+      startY: clientY,
+      timer: window.setTimeout(() => {
+        holdRef.current = null;
+        beginDrag(goal.id, section, clientX, clientY);
+      }, 380),
+    };
+    setGestureActive(true);
+  }
+
+  const setCardRef = (goalId: string) => (el: HTMLElement | null) => {
+    if (el) {
+      cardElsRef.current.set(goalId, el);
+    } else {
+      cardElsRef.current.delete(goalId);
+    }
+  };
 
   useEffect(() => {
     if (!celebration) return;
@@ -592,17 +858,54 @@ export default function Home() {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [settingsOpen]);
 
+  useEffect(() => {
+    if (!cardEditor) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setCardEditor(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [cardEditor]);
+
+  // Printing the A5 card: after finishing a goal the fireworks get a moment
+  // first; reprints from the archive open the dialog almost immediately.
+  useEffect(() => {
+    if (!printGoal) return;
+    const timeout = window.setTimeout(
+      () => {
+        window.print();
+        setPrintGoal(null);
+      },
+      printAutoRef.current ? 1600 : 250,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [printGoal]);
+
   const activeGoals = useMemo(
     () => goals.filter((goal) => goal.status !== "completed"),
     [goals],
   );
+  // Closed goals follow the shared array order so manual reordering sticks.
   const closedGoals = useMemo(
-    () =>
-      goals
-        .filter((goal) => goal.status === "completed")
-        .sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0)),
+    () => goals.filter((goal) => goal.status === "completed"),
     [goals],
   );
+  const goalById = useMemo(
+    () => new Map(goals.map((goal) => [goal.id, goal])),
+    [goals],
+  );
+  const displayActiveGoals =
+    drag && drag.section === "active"
+      ? drag.order
+          .map((id) => goalById.get(id))
+          .filter((goal): goal is Goal => Boolean(goal))
+      : activeGoals;
+  const displayClosedGoals =
+    drag && drag.section === "closed"
+      ? drag.order
+          .map((id) => goalById.get(id))
+          .filter((goal): goal is Goal => Boolean(goal))
+      : closedGoals;
   const startedCount = goals.filter(
     (goal) => goal.status === "in-progress",
   ).length;
@@ -625,6 +928,9 @@ export default function Home() {
     const title = newGoalTitle.trim();
     if (!title) return;
 
+    const startedAt = newGoalStartTime ? todayAtTime(newGoalStartTime) : null;
+    if (startedAt) setNow(currentTimestamp());
+
     const nextGoals: Goal[] = [
       ...goalsRef.current,
       {
@@ -633,8 +939,8 @@ export default function Home() {
             ? crypto.randomUUID()
             : `goal-${currentTimestamp()}`,
         title,
-        status: "not-started",
-        startedAt: null,
+        status: startedAt ? "in-progress" : "not-started",
+        startedAt,
         elapsedMs: 0,
         completedAt: null,
         targetMs: targetFromInputs(newGoalHours, newGoalMinutes),
@@ -644,6 +950,7 @@ export default function Home() {
     setNewGoalTitle("");
     setNewGoalHours("0");
     setNewGoalMinutes("0");
+    setNewGoalStartTime("");
   }
 
   function beginEditingGoal(goal: Goal) {
@@ -730,6 +1037,79 @@ export default function Home() {
       });
     applySharedGoals(nextGoals);
     setCelebration({ id: finishedAt });
+
+    const completedGoal = nextGoals.find((goal) => goal.id === goalId);
+    if (completedGoal) {
+      printAutoRef.current = true;
+      setPrintGoal(completedGoal);
+    }
+  }
+
+  function pauseGoal(goalId: string) {
+    const pausedAt = currentTimestamp();
+    const nextGoals: Goal[] = goalsRef.current.map((goal) =>
+      goal.id === goalId && goal.status === "in-progress" && goal.startedAt
+        ? {
+            ...goal,
+            elapsedMs: goal.elapsedMs + Math.max(0, pausedAt - goal.startedAt),
+            startedAt: null,
+          }
+        : goal,
+    );
+    applySharedGoals(nextGoals);
+  }
+
+  function resumeGoal(goalId: string) {
+    const resumedAt = currentTimestamp();
+    setNow(resumedAt);
+    const nextGoals: Goal[] = goalsRef.current.map((goal) =>
+      goal.id === goalId && isPausedGoal(goal)
+        ? { ...goal, startedAt: resumedAt }
+        : goal,
+    );
+    applySharedGoals(nextGoals);
+  }
+
+  function beginCardEdit(goal: Goal) {
+    if (currentTimestamp() < suppressClickUntilRef.current) return;
+    const targetParts = targetInputParts(goal.targetMs);
+    const workParts = targetInputParts(goal.elapsedMs);
+    setCardEditor({
+      goalId: goal.id,
+      title: displayGoalTitle(goal, language),
+      targetHours: targetParts.hours,
+      targetMinutes: targetParts.minutes,
+      workHours: workParts.hours,
+      workMinutes: workParts.minutes,
+      initialWork: `${workParts.hours}:${workParts.minutes}`,
+    });
+  }
+
+  function saveCardEditor(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const editor = cardEditor;
+    if (!editor) return;
+    const title = editor.title.trim();
+    if (!title) return;
+
+    // Work time granularity is minutes, so leave elapsedMs untouched unless
+    // the fields were actually changed.
+    const workChanged =
+      `${editor.workHours}:${editor.workMinutes}` !== editor.initialWork;
+    const nextGoals: Goal[] = goalsRef.current.map((goal) =>
+      goal.id === editor.goalId
+        ? {
+            ...goal,
+            title,
+            targetMs: targetFromInputs(editor.targetHours, editor.targetMinutes),
+            elapsedMs: workChanged
+              ? durationFromInputs(editor.workHours, editor.workMinutes)
+              : goal.elapsedMs,
+          }
+        : goal,
+    );
+    applySharedGoals(nextGoals);
+    setCardEditor(null);
   }
 
   function reopenGoal(goalId: string) {
@@ -764,6 +1144,7 @@ export default function Home() {
   }
 
   return (
+    <>
     <main className="site-shell" dir={direction}>
       {celebration ? (
         <Fireworks celebration={celebration} message={text.celebration} />
@@ -863,23 +1244,34 @@ export default function Home() {
 
           {activeGoals.length > 0 ? (
             <div className="goals-grid">
-              {activeGoals.map((goal, index) => {
+              {displayActiveGoals.map((goal, index) => {
                 const goalTitle = displayGoalTitle(goal, language);
                 const elapsed = elapsedFor(goal);
                 const targetDelta = (goal.targetMs ?? 0) - elapsed;
+                const paused = isPausedGoal(goal);
                 return (
                   <article
-                    className={`goal-card goal-${goal.status}`}
+                    className={`goal-card goal-${goal.status}${
+                      paused ? " goal-paused" : ""
+                    }${drag?.goalId === goal.id ? " drag-placeholder" : ""}`}
                     key={goal.id}
+                    ref={setCardRef(goal.id)}
+                    title={text.dragHint}
+                    onPointerDown={(event) =>
+                      handleCardPointerDown(event, goal, "active")
+                    }
+                    onDoubleClick={() => beginCardEdit(goal)}
                   >
                     <div className="goal-card-top">
                       <span className="goal-number">
                         {String(index + 1).padStart(2, "0")}
                       </span>
                       <span className="goal-state">
-                        {goal.status === "in-progress"
-                          ? text.inProgress
-                          : text.notStarted}
+                        {paused
+                          ? text.pausedLabel
+                          : goal.status === "in-progress"
+                            ? text.inProgress
+                            : text.notStarted}
                       </span>
                     </div>
 
@@ -916,15 +1308,38 @@ export default function Home() {
                           {text.startGoal}
                         </button>
                       ) : (
-                        <button
-                          className="goal-control-button finish-control"
-                          type="button"
-                          onClick={() => finishGoal(goal.id)}
-                          aria-label={`${text.finish} ${goalTitle}`}
-                        >
-                          <span aria-hidden="true">✓</span>
-                          {text.finishGoal}
-                        </button>
+                        <>
+                          {paused ? (
+                            <button
+                              className="goal-control-button start-control"
+                              type="button"
+                              onClick={() => resumeGoal(goal.id)}
+                              aria-label={`${text.resumeGoal}: ${goalTitle}`}
+                            >
+                              <span aria-hidden="true">▶</span>
+                              {text.resumeGoal}
+                            </button>
+                          ) : (
+                            <button
+                              className="goal-control-button pause-control"
+                              type="button"
+                              onClick={() => pauseGoal(goal.id)}
+                              aria-label={`${text.pauseGoal}: ${goalTitle}`}
+                            >
+                              <span aria-hidden="true">❚❚</span>
+                              {text.pauseGoal}
+                            </button>
+                          )}
+                          <button
+                            className="goal-control-button finish-control"
+                            type="button"
+                            onClick={() => finishGoal(goal.id)}
+                            aria-label={`${text.finish} ${goalTitle}`}
+                          >
+                            <span aria-hidden="true">✓</span>
+                            {text.finishGoal}
+                          </button>
+                        </>
                       )}
                     </div>
                   </article>
@@ -953,10 +1368,21 @@ export default function Home() {
 
           {closedGoals.length > 0 ? (
             <div className="closed-goals-grid">
-              {closedGoals.map((goal) => {
+              {displayClosedGoals.map((goal) => {
                 const goalTitle = displayGoalTitle(goal, language);
                 return (
-                  <article className="closed-goal-card" key={goal.id}>
+                  <article
+                    className={`closed-goal-card${
+                      drag?.goalId === goal.id ? " drag-placeholder" : ""
+                    }`}
+                    key={goal.id}
+                    ref={setCardRef(goal.id)}
+                    title={text.dragHint}
+                    onPointerDown={(event) =>
+                      handleCardPointerDown(event, goal, "closed")
+                    }
+                    onDoubleClick={() => beginCardEdit(goal)}
+                  >
                     <div className="goal-card-top">
                       <span className="closed-check" aria-hidden="true">
                         ✓
@@ -992,6 +1418,17 @@ export default function Home() {
                         onClick={() => reopenGoal(goal.id)}
                       >
                         {text.reopen}
+                      </button>
+                      <button
+                        className="print-goal-button"
+                        type="button"
+                        onClick={() => {
+                          printAutoRef.current = false;
+                          setPrintGoal(goal);
+                        }}
+                        aria-label={`${text.printCardFor} ${goalTitle}`}
+                      >
+                        {text.printCard}
                       </button>
                       <button
                         className="reset-button"
@@ -1082,6 +1519,18 @@ export default function Home() {
                       value={newGoalMinutes}
                       onChange={(event) => setNewGoalMinutes(event.target.value)}
                       inputMode="numeric"
+                    />
+                  </label>
+                </div>
+                <div className="target-time-fields start-time-field">
+                  <span>{text.startTimeLabel}</span>
+                  <label>
+                    <input
+                      type="time"
+                      value={newGoalStartTime}
+                      onChange={(event) =>
+                        setNewGoalStartTime(event.target.value)
+                      }
                     />
                   </label>
                 </div>
@@ -1222,6 +1671,206 @@ export default function Home() {
           </section>
         </div>
       ) : null}
+
+      {cardEditor ? (
+        <div
+          className="settings-backdrop"
+          role="presentation"
+          onMouseDown={() => setCardEditor(null)}
+        >
+          <section
+            className="settings-dialog goal-edit-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="goal-edit-title"
+            dir={direction}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button
+              className="settings-close"
+              type="button"
+              aria-label={text.cancel}
+              onClick={() => setCardEditor(null)}
+            >
+              ×
+            </button>
+            <span className="section-kicker">{text.editGoalTitle}</span>
+            <h2 id="goal-edit-title">{text.editGoalTitle}</h2>
+            <p>{text.editGoalDescription}</p>
+
+            <form className="edit-goal-form" onSubmit={saveCardEditor}>
+              <label>
+                <span>{text.newGoalName}</span>
+                <input
+                  type="text"
+                  value={cardEditor.title}
+                  onChange={(event) =>
+                    setCardEditor({ ...cardEditor, title: event.target.value })
+                  }
+                  maxLength={120}
+                  autoFocus
+                />
+              </label>
+              <div className="target-time-fields compact-time-fields">
+                <span>{text.targetTime}</span>
+                <label>
+                  <span>{text.hours}</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="999"
+                    value={cardEditor.targetHours}
+                    onChange={(event) =>
+                      setCardEditor({
+                        ...cardEditor,
+                        targetHours: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  <span>{text.minutes}</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    value={cardEditor.targetMinutes}
+                    onChange={(event) =>
+                      setCardEditor({
+                        ...cardEditor,
+                        targetMinutes: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+              </div>
+              <div className="target-time-fields compact-time-fields">
+                <span>{text.workTimeLabel}</span>
+                <label>
+                  <span>{text.hours}</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="999"
+                    value={cardEditor.workHours}
+                    onChange={(event) =>
+                      setCardEditor({
+                        ...cardEditor,
+                        workHours: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  <span>{text.minutes}</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    value={cardEditor.workMinutes}
+                    onChange={(event) =>
+                      setCardEditor({
+                        ...cardEditor,
+                        workMinutes: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+              </div>
+              <div className="edit-form-actions">
+                <button type="submit">{text.save}</button>
+                <button type="button" onClick={() => setCardEditor(null)}>
+                  {text.cancel}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
+
+      {drag
+        ? (() => {
+            const goal = goalById.get(drag.goalId);
+            if (!goal) return null;
+            const paused = isPausedGoal(goal);
+            return (
+              <article
+                className={`${
+                  goal.status === "completed"
+                    ? "closed-goal-card"
+                    : `goal-card goal-${goal.status}`
+                }${paused ? " goal-paused" : ""} drag-ghost`}
+                style={{
+                  width: drag.width,
+                  height: drag.height,
+                  transform: `translate(${drag.x}px, ${drag.y}px)`,
+                }}
+                dir={direction}
+                aria-hidden="true"
+              >
+                <div className="goal-card-top">
+                  <span className="goal-state">
+                    {goal.status === "completed"
+                      ? text.completed
+                      : paused
+                        ? text.pausedLabel
+                        : goal.status === "in-progress"
+                          ? text.inProgress
+                          : text.notStarted}
+                  </span>
+                </div>
+                <h3 className="goal-text">
+                  {displayGoalTitle(goal, language)}
+                </h3>
+              </article>
+            );
+          })()
+        : null}
     </main>
+
+    {printGoal ? (
+      <div className="print-card-root" dir={direction}>
+        <div className="print-card">
+          <div className="print-card-stripe" aria-hidden="true" />
+          <img
+            className="print-card-logo"
+            src="/tzviair-logo.png"
+            alt="TzviAir"
+          />
+          <p className="print-card-kicker">{text.goalCompletedCard}</p>
+          <h1 className="print-card-title">
+            {displayGoalTitle(printGoal, language)}
+          </h1>
+          <div className="print-card-stats">
+            <div>
+              <span>{text.workTime}</span>
+              <strong>{formatElapsed(printGoal.elapsedMs)}</strong>
+            </div>
+            <div>
+              <span>{text.completionDate}</span>
+              <strong>
+                {formatCompletedAt(
+                  printGoal.completedAt,
+                  language,
+                  text.completedBeforeTimer,
+                )}
+              </strong>
+            </div>
+            {printGoal.targetMs ? (
+              <div>
+                <span>{text.targetTime}</span>
+                <strong>{formatElapsed(printGoal.targetMs)}</strong>
+              </div>
+            ) : null}
+          </div>
+          <div className="print-card-footer">
+            <span>TzviAir</span>
+            <span aria-hidden="true">•</span>
+            <span>{text.footer}</span>
+          </div>
+        </div>
+      </div>
+    ) : null}
+    </>
   );
 }

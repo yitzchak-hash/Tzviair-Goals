@@ -1417,3 +1417,219 @@ footer {
     transition-duration: 1ms !important;
   }
 }
+
+/* --- Press-and-hold drag reordering --- */
+
+body.dragging-goal {
+  cursor: grabbing;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.goal-card,
+.closed-goal-card {
+  touch-action: pan-y;
+}
+
+.drag-placeholder {
+  opacity: 0.35;
+  box-shadow: none;
+}
+
+.drag-placeholder::after {
+  position: absolute;
+  inset: 0;
+  border: 2px dashed rgba(0, 188, 231, 0.55);
+  border-radius: inherit;
+  content: "";
+}
+
+.drag-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 90;
+  margin: 0;
+  pointer-events: none;
+  overflow: hidden;
+  cursor: grabbing;
+  box-shadow: 0 26px 52px rgba(8, 43, 102, 0.32);
+  scale: 1.04;
+  rotate: 1.5deg;
+}
+
+/* --- Pause control and paused state --- */
+
+.goal-card-bottom {
+  gap: 0.55rem;
+}
+
+.goal-card-bottom .goal-control-button {
+  flex: 1 1 auto;
+  justify-content: center;
+}
+
+.pause-control {
+  background: linear-gradient(120deg, #5b7391 0%, #43597a 100%);
+}
+
+.goal-paused .goal-state {
+  color: var(--orange);
+}
+
+.goal-paused .goal-timer {
+  border-color: rgba(255, 121, 0, 0.35);
+}
+
+.goal-paused .goal-timer strong {
+  color: var(--navy);
+}
+
+/* --- Per-goal edit dialog (double-click a card) --- */
+
+.goal-edit-dialog {
+  max-width: 560px;
+}
+
+.goal-edit-dialog .edit-goal-form {
+  margin-top: 0.6rem;
+}
+
+/* --- Add-goal "work already started at" field --- */
+
+.start-time-field input[type="time"] {
+  min-width: 7.5rem;
+}
+
+/* --- Printed A5 completion card --- */
+
+.print-card-root {
+  display: none;
+}
+
+@page {
+  size: A5;
+  margin: 0;
+}
+
+@media print {
+  html,
+  body {
+    background: #ffffff !important;
+  }
+
+  .site-shell,
+  .celebration-layer,
+  .settings-backdrop {
+    display: none !important;
+  }
+
+  .print-card-root {
+    display: block;
+  }
+}
+
+.print-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 100vh;
+  padding: 12mm 14mm 10mm;
+  background: #ffffff;
+  color: var(--ink);
+  font-family: var(--font-heebo), "Segoe UI", sans-serif;
+}
+
+.print-card-stripe {
+  height: 5mm;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--cyan) 0 36%,
+    var(--orange) 36% 66%,
+    var(--gold) 66%
+  );
+}
+
+.print-card-logo {
+  display: block;
+  width: 44mm;
+  height: auto;
+  margin: 9mm auto 5mm;
+}
+
+.print-card-kicker {
+  margin: 0;
+  text-align: center;
+  font-family: var(--font-rubik), "Segoe UI", sans-serif;
+  font-size: 11pt;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--cyan-dark);
+  text-transform: uppercase;
+}
+
+.print-card-title {
+  margin: 4mm 0 9mm;
+  text-align: center;
+  font-family: var(--font-rubik), "Segoe UI", sans-serif;
+  font-size: 21pt;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--navy);
+}
+
+.print-card-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 4mm;
+  margin: 0 4mm;
+}
+
+.print-card-stats > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6mm;
+  padding-bottom: 2.5mm;
+  border-bottom: 1px solid var(--border);
+}
+
+.print-card-stats span {
+  font-size: 11pt;
+  color: var(--muted);
+}
+
+.print-card-stats strong {
+  font-family: var(--font-rubik), "Segoe UI", sans-serif;
+  font-size: 14pt;
+  font-variant-numeric: tabular-nums;
+  color: var(--navy);
+}
+
+.print-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2mm;
+  margin-top: auto;
+  padding-top: 8mm;
+  font-size: 10pt;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* --- Closed-card print button --- */
+
+.closed-actions .print-goal-button {
+  color: var(--cyan-dark);
+  border-color: rgba(0, 188, 231, 0.45);
+}
+
+.closed-actions .reset-button {
+  grid-column: 1 / -1;
+}
+
+.closed-goal-card {
+  position: relative;
+}

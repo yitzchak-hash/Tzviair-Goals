@@ -50,6 +50,9 @@ const translations = {
     overTarget: "מעבר ליעד",
     startGoal: "התחל",
     finishGoal: "סיים",
+    pauseGoal: "השהה",
+    resumeGoal: "המשך",
+    paused: "מושהה",
     startTimerFor: "התחל טיימר עבור",
     finish: "סיים את",
     openBoard: "פתיחת הלוח המלא",
@@ -72,6 +75,9 @@ const translations = {
     overTarget: "Over target",
     startGoal: "Start",
     finishGoal: "Finish",
+    pauseGoal: "Pause",
+    resumeGoal: "Resume",
+    paused: "Paused",
     startTimerFor: "Start timer for",
     finish: "Finish",
     openBoard: "Open the full board",
@@ -117,6 +123,12 @@ type WidgetOptions = {
 
 function currentTimestamp() {
   return Date.now();
+}
+
+// Paused goals keep the in-progress status with no running segment — the
+// same backward-compatible convention the main board uses.
+function isPausedGoal(goal: Goal) {
+  return goal.status === "in-progress" && goal.startedAt === null;
 }
 
 const defaultOptions: WidgetOptions = {
@@ -360,7 +372,7 @@ export default function GoalsWidget() {
   }, [flushPendingSave, mounted]);
 
   const hasRunningTimer = (goals ?? []).some(
-    (goal) => goal.status === "in-progress",
+    (goal) => goal.status === "in-progress" && goal.startedAt !== null,
   );
 
   useEffect(() => {
@@ -451,6 +463,34 @@ export default function GoalsWidget() {
     );
   }
 
+  function pauseGoal(goalId: string) {
+    const pausedAt = currentTimestamp();
+    applySharedGoals(
+      goalsRef.current.map((goal) =>
+        goal.id === goalId && goal.status === "in-progress" && goal.startedAt
+          ? {
+              ...goal,
+              elapsedMs:
+                goal.elapsedMs + Math.max(0, pausedAt - goal.startedAt),
+              startedAt: null,
+            }
+          : goal,
+      ),
+    );
+  }
+
+  function resumeGoal(goalId: string) {
+    const resumedAt = currentTimestamp();
+    setNow(resumedAt);
+    applySharedGoals(
+      goalsRef.current.map((goal) =>
+        goal.id === goalId && isPausedGoal(goal)
+          ? { ...goal, startedAt: resumedAt }
+          : goal,
+      ),
+    );
+  }
+
   function finishGoal(goalId: string) {
     const finishedAt = currentTimestamp();
     applySharedGoals(
@@ -472,22 +512,32 @@ export default function GoalsWidget() {
   const statusLabel = (goal: Goal) =>
     goal.status === "completed"
       ? text.completed
-      : goal.status === "in-progress"
-        ? text.inProgress
-        : text.notStarted;
+      : isPausedGoal(goal)
+        ? text.paused
+        : goal.status === "in-progress"
+          ? text.inProgress
+          : text.notStarted;
 
   function renderTile(goal: Goal) {
     const goalTitle = displayGoalTitle(goal, options.language);
     const elapsed = elapsedFor(goal);
     const targetDelta = (goal.targetMs ?? 0) - elapsed;
+    const paused = isPausedGoal(goal);
 
     return (
-      <article className={`gw-tile gw-${goal.status}`} key={goal.id}>
+      <article
+        className={`gw-tile gw-${goal.status}${paused ? " gw-paused" : ""}`}
+        key={goal.id}
+      >
         <div className="gw-tile-top">
           <span className="gw-state">
             {goal.status === "completed" ? (
               <i className="gw-check" aria-hidden="true">
                 ✓
+              </i>
+            ) : paused ? (
+              <i className="gw-pause-mark" aria-hidden="true">
+                ❚❚
               </i>
             ) : goal.status === "in-progress" ? (
               <i className="gw-pulse" aria-hidden="true" />
@@ -523,14 +573,35 @@ export default function GoalsWidget() {
                 <span aria-hidden="true">▶</span> {text.startGoal}
               </button>
             ) : (
-              <button
-                className="gw-button gw-finish"
-                type="button"
-                onClick={() => finishGoal(goal.id)}
-                aria-label={`${text.finish} ${goalTitle}`}
-              >
-                <span aria-hidden="true">✓</span> {text.finishGoal}
-              </button>
+              <>
+                {paused ? (
+                  <button
+                    className="gw-button gw-start"
+                    type="button"
+                    onClick={() => resumeGoal(goal.id)}
+                    aria-label={`${text.resumeGoal}: ${goalTitle}`}
+                  >
+                    <span aria-hidden="true">▶</span> {text.resumeGoal}
+                  </button>
+                ) : (
+                  <button
+                    className="gw-button gw-pause"
+                    type="button"
+                    onClick={() => pauseGoal(goal.id)}
+                    aria-label={`${text.pauseGoal}: ${goalTitle}`}
+                  >
+                    <span aria-hidden="true">❚❚</span> {text.pauseGoal}
+                  </button>
+                )}
+                <button
+                  className="gw-button gw-finish"
+                  type="button"
+                  onClick={() => finishGoal(goal.id)}
+                  aria-label={`${text.finish} ${goalTitle}`}
+                >
+                  <span aria-hidden="true">✓</span> {text.finishGoal}
+                </button>
+              </>
             )}
           </div>
         ) : null}

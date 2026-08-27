@@ -279,7 +279,24 @@ html.goals-widget-transparent body {
 }
 
 .gw-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
   margin-block-start: 0.15rem;
+}
+
+.gw-paused .gw-state {
+  color: var(--orange);
+}
+
+.gw-pause-mark {
+  font-style: normal;
+  font-size: 0.62rem;
+  letter-spacing: -0.08em;
+}
+
+.gw-pause {
+  background: linear-gradient(120deg, #5b7391 0%, #43597a 100%);
 }
 
 .gw-button {
