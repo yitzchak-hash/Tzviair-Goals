@@ -62,7 +62,7 @@ const translations = {
     cloudSyncing: "שומר...",
     cloudOffline: "ממתין לחיבור",
     moreGoals: "יעדים נוספים",
-    cloudLocked: "לצפייה בלבד — כניסה בלוח המלא",
+    cloudLocked: "לצפייה בלבד. כניסה בלוח המלא",
   },
   en: {
     boardLabel: "TzviAir Goals",
@@ -88,7 +88,7 @@ const translations = {
     cloudSyncing: "Saving...",
     cloudOffline: "Waiting for connection",
     moreGoals: "more goals",
-    cloudLocked: "View only — sign in on the full board",
+    cloudLocked: "View only. Sign in on the full board",
   },
 } as const;
 
