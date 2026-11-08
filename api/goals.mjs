@@ -1,5 +1,7 @@
 import { del, get, put } from "@vercel/blob";
 
+import { authorizeWrite } from "../lib/write-auth.mjs";
+
 const STATE_PATH = "tzviair-goals/shared-state.json";
 const TEST_STATE_PATH = "tzviair-goals/preview-test-state.json";
 const MAX_GOALS = 200;
@@ -48,8 +50,8 @@ function sendJson(response, statusCode, body) {
   response.end(JSON.stringify(body));
 }
 
-async function readState(pathname) {
-  const result = await get(pathname, { access: "private" });
+async function readState(storage, pathname) {
+  const result = await storage.get(pathname, { access: "private" });
   if (!result || result.statusCode !== 200) return null;
 
   const state = await new Response(result.stream).json();
@@ -75,7 +77,10 @@ function parseBody(request) {
   return request.body;
 }
 
-export default async function handler(request, response) {
+// Storage is injectable so tests can prove the write lock without touching
+// the real Blob store.
+export function createHandler(storage = { get, put, del }) {
+  return async function handler(request, response) {
   try {
     const isPreviewTest =
       process.env.VERCEL_ENV === "preview" &&
@@ -83,13 +88,21 @@ export default async function handler(request, response) {
     const statePath = isPreviewTest ? TEST_STATE_PATH : STATE_PATH;
 
     if (request.method === "GET") {
-      const state = await readState(statePath);
+      const state = await readState(storage, statePath);
       sendJson(
         response,
         200,
         state ?? { version: 1, goals: null, updatedAt: 0 },
       );
       return;
+    }
+
+    if (request.method === "POST" || request.method === "DELETE") {
+      const auth = authorizeWrite(request);
+      if (!auth.ok) {
+        sendJson(response, auth.status, { error: auth.error, locked: true });
+        return;
+      }
     }
 
     if (request.method === "POST") {
@@ -105,7 +118,7 @@ export default async function handler(request, response) {
         updatedAt: Date.now(),
       };
 
-      await put(statePath, JSON.stringify(state), {
+      await storage.put(statePath, JSON.stringify(state), {
         access: "private",
         addRandomSuffix: false,
         allowOverwrite: true,
@@ -117,7 +130,7 @@ export default async function handler(request, response) {
     }
 
     if (request.method === "DELETE" && isPreviewTest) {
-      await del(TEST_STATE_PATH);
+      await storage.del(TEST_STATE_PATH);
       sendJson(response, 200, { deleted: true });
       return;
     }
@@ -130,4 +143,7 @@ export default async function handler(request, response) {
       error: "Shared storage is temporarily unavailable.",
     });
   }
+  };
 }
+
+export default createHandler();

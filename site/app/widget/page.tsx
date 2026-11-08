@@ -62,6 +62,7 @@ const translations = {
     cloudSyncing: "שומר...",
     cloudOffline: "ממתין לחיבור",
     moreGoals: "יעדים נוספים",
+    cloudLocked: "לצפייה בלבד — כניסה בלוח המלא",
   },
   en: {
     boardLabel: "TzviAir Goals",
@@ -87,12 +88,16 @@ const translations = {
     cloudSyncing: "Saving...",
     cloudOffline: "Waiting for connection",
     moreGoals: "more goals",
+    cloudLocked: "View only — sign in on the full board",
   },
 } as const;
 
 type Language = keyof typeof translations;
 type GoalStatus = "not-started" | "in-progress" | "completed";
-type SyncStatus = "connecting" | "syncing" | "saved" | "offline";
+type SyncStatus = "connecting" | "syncing" | "saved" | "offline" | "locked";
+
+// Thrown when the server refuses a write because this browser is not signed in.
+class WriteLockedError extends Error {}
 type WidgetView = "board" | "dashboard";
 
 type Goal = {
@@ -214,6 +219,9 @@ async function writeCloudState(goals: Goal[]) {
     },
     body: JSON.stringify({ goals }),
   });
+  if (response.status === 401 || response.status === 403) {
+    throw new WriteLockedError("Sign in to make changes.");
+  }
   if (!response.ok) throw new Error("Unable to save shared goals.");
 
   const state: unknown = await response.json();
@@ -259,6 +267,7 @@ export default function GoalsWidget() {
   const pendingSaveRef = useRef<Goal[] | null>(null);
   const saveRunningRef = useRef(false);
   const lastServerUpdatedAtRef = useRef(0);
+  const lockedRef = useRef(false);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const text = translations[options.language];
   const direction = options.language === "he" ? "rtl" : "ltr";
@@ -295,14 +304,22 @@ export default function GoalsWidget() {
         if (pendingSaveRef.current === goalsToSave) {
           pendingSaveRef.current = null;
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof WriteLockedError) {
+          // Not signed in: drop the change; the next read restores the board.
+          pendingSaveRef.current = null;
+          lastServerUpdatedAtRef.current = 0;
+          lockedRef.current = true;
+          setSyncStatus("locked");
+          break;
+        }
         setSyncStatus("offline");
         break;
       }
     }
 
     saveRunningRef.current = false;
-    if (!pendingSaveRef.current) setSyncStatus("saved");
+    if (!pendingSaveRef.current && !lockedRef.current) setSyncStatus("saved");
   }, []);
 
   const applySharedGoals = useCallback(
@@ -344,7 +361,7 @@ export default function GoalsWidget() {
           goalsRef.current = [];
           setGoals([]);
         }
-        setSyncStatus("saved");
+        setSyncStatus(lockedRef.current ? "locked" : "saved");
       } catch {
         if (!cancelled) setSyncStatus("offline");
       }
@@ -625,7 +642,9 @@ export default function GoalsWidget() {
             className={`gw-sync gw-sync-${syncStatus}`}
             aria-live="polite"
             title={
-              syncStatus === "saved"
+              syncStatus === "locked"
+                ? text.cloudLocked
+                : syncStatus === "saved"
                 ? text.cloudSaved
                 : syncStatus === "offline"
                   ? text.cloudOffline

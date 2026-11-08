@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "build": "npm --prefix site run vercel-build",
-    "test": "node --test api/goals.test.mjs"
+    "test": "node --test api/goals.test.mjs tests/write-lock.test.mjs"
   },
   "engines": {
     "node": ">=22.13.0"

@@ -57,7 +57,8 @@ html.goals-widget-transparent body {
   background: #23b26d;
 }
 
-.gw-sync-offline i {
+.gw-sync-offline i,
+.gw-sync-locked i {
   background: var(--orange);
 }
 

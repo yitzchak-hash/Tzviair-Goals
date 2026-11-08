@@ -107,6 +107,11 @@ before trusting a message.
   start/finish writes go through the same validation and last-write-wins
   storage as the board.
 - **Read-only by default.** Without `interactive`, the widget never writes.
+- **Write lock.** When the goals app's write lock is on (see
+  `WRITE-LOCK.md`), interactive changes need a signed-in browser; otherwise
+  the change is undone and the status dot reads "View only". Another app
+  that wants to write should call `/api/goals` from its server with its named
+  key, not from the browser.
 - **Paused goals.** A goal paused on the main board shows as "מושהה"/"Paused"
   with a frozen timer; in `interactive` mode tiles offer pause/resume
   alongside start/finish.

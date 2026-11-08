@@ -438,9 +438,10 @@ of `next/image`. The build and TypeScript checks passed.
 
 ## 9. Known gaps and fragile areas
 
-- **No authentication or authorization.** The site is public and POST has no
-  PIN, login, CSRF protection, write token, or allowlist. Anyone who can reach
-  the URL/API can replace the board after passing schema validation.
+- **Write lock (added after this export).** See `WRITE-LOCK.md`. Reads stay
+  public. Writes from other websites are always refused; with
+  `GOALS_WRITE_LOCK=on`, writes need the team-PIN sign-in cookie
+  (`/api/session`) or a named server key (`GOALS_WRITE_KEYS`).
 - **Last-write-wins synchronization.** Concurrent edits can silently overwrite
   each other because the whole array is replaced with no revision precondition.
 - **No separate pause/stop.** A goal is only not-started, running, or completed.

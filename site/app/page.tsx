@@ -121,6 +121,15 @@ const translations = {
     printCardFor: "הדפסת כרטיס עבור",
     goalCompletedCard: "יעד הושלם",
     dragHint: "לחיצה ארוכה וגרירה לשינוי הסדר",
+    cloudLocked: "לצפייה בלבד — כניסה",
+    signInTitle: "כניסה לעריכת הלוח",
+    signInDescription:
+      "הלוח נעול לשינויים. הזינו את קוד הצוות פעם אחת במחשב הזה, והוא יזכור אתכם.",
+    signInRefused: "השינוי לא נשמר — צריך להיכנס קודם.",
+    teamPin: "קוד צוות",
+    signIn: "כניסה",
+    wrongPin: "הקוד שגוי. נסו שוב.",
+    closeSignIn: "סגירת חלון הכניסה",
   },
   en: {
     languageButton: "עברית",
@@ -198,6 +207,15 @@ const translations = {
     printCardFor: "Print a card for",
     goalCompletedCard: "Goal completed",
     dragHint: "Press and hold, then drag to reorder",
+    cloudLocked: "View only — sign in",
+    signInTitle: "Sign in to edit the board",
+    signInDescription:
+      "The board is locked for changes. Enter the team PIN once on this computer and it will remember you.",
+    signInRefused: "That change was not saved — sign in first.",
+    teamPin: "Team PIN",
+    signIn: "Sign in",
+    wrongPin: "Wrong PIN. Try again.",
+    closeSignIn: "Close sign-in",
   },
 } as const;
 
@@ -325,6 +343,35 @@ async function readCloudState() {
   return state;
 }
 
+// Thrown when the server refuses a write because this browser is not signed in.
+class WriteLockedError extends Error {}
+
+async function readSessionState() {
+  try {
+    const response = await fetch("/api/session", {
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) return null;
+    const state: unknown = await response.json();
+    if (!state || typeof state !== "object") return null;
+    const { locked, signedIn } = state as { locked?: unknown; signedIn?: unknown };
+    return { locked: locked === true, signedIn: signedIn === true };
+  } catch {
+    return null;
+  }
+}
+
+async function signInWithPin(pin: string) {
+  const response = await fetch("/api/session", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pin }),
+  });
+  return response.ok;
+}
+
 async function writeCloudState(goals: Goal[]) {
   const response = await fetch("/api/goals", {
     method: "POST",
@@ -335,6 +382,9 @@ async function writeCloudState(goals: Goal[]) {
     },
     body: JSON.stringify({ goals }),
   });
+  if (response.status === 401 || response.status === 403) {
+    throw new WriteLockedError("Sign in to make changes.");
+  }
   if (!response.ok) throw new Error("Unable to save shared goals.");
 
   const state: unknown = await response.json();
@@ -460,6 +510,12 @@ export default function Home() {
   const [celebration, setCelebration] = useState<Celebration | null>(null);
   const [language, setLanguage] = useState<Language>("he");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [writeLocked, setWriteLocked] = useState(false);
+  const [signInOpen, setSignInOpen] = useState(false);
+  const [signInRefused, setSignInRefused] = useState(false);
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState(false);
+  const [pinBusy, setPinBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [ready, setReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("connecting");
@@ -510,7 +566,25 @@ export default function Home() {
         if (pendingSaveRef.current === goalsToSave) {
           pendingSaveRef.current = null;
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof WriteLockedError) {
+          // Not signed in: drop the unsaved change and let the next read
+          // restore the shared board, then offer sign-in.
+          pendingSaveRef.current = null;
+          lastServerUpdatedAtRef.current = 0;
+          setWriteLocked(true);
+          setSignInRefused(true);
+          setSignInOpen(true);
+          void readCloudState()
+            .then((state) => {
+              if (!state.goals || pendingSaveRef.current) return;
+              lastServerUpdatedAtRef.current = state.updatedAt;
+              goalsRef.current = state.goals;
+              setGoals(state.goals);
+            })
+            .catch(() => undefined);
+          break;
+        }
         setSyncStatus("offline");
         break;
       }
@@ -651,6 +725,37 @@ export default function Home() {
       document.removeEventListener("visibilitychange", syncWhenVisible);
     };
   }, [flushPendingSave, ready]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void readSessionState().then((state) => {
+      if (!cancelled && state?.locked && !state.signedIn) setWriteLocked(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function submitPin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!pinInput.trim() || pinBusy) return;
+    setPinBusy(true);
+    setPinError(false);
+    try {
+      if (await signInWithPin(pinInput.trim())) {
+        setWriteLocked(false);
+        setSignInOpen(false);
+        setSignInRefused(false);
+        setPinInput("");
+      } else {
+        setPinError(true);
+      }
+    } catch {
+      setPinError(true);
+    } finally {
+      setPinBusy(false);
+    }
+  }
 
   const hasRunningTimer = goals.some(
     (goal) => goal.status === "in-progress" && goal.startedAt !== null,
@@ -1153,18 +1258,34 @@ export default function Home() {
       <header className="brand-header">
         <div className="brand-stripe" aria-hidden="true" />
         <div className="top-controls" dir={direction}>
-          <span
-            className={`sync-indicator sync-${syncStatus}`}
-            title={text.sharedBoard}
-            aria-live="polite"
-          >
-            <i aria-hidden="true" />
-            {syncStatus === "saved"
-              ? text.cloudSaved
-              : syncStatus === "offline"
-                ? text.cloudOffline
-                : text.cloudSyncing}
-          </span>
+          {writeLocked ? (
+            <button
+              className="sync-indicator sync-locked"
+              type="button"
+              title={text.signInTitle}
+              aria-live="polite"
+              onClick={() => {
+                setSignInRefused(false);
+                setSignInOpen(true);
+              }}
+            >
+              <i aria-hidden="true" />
+              {text.cloudLocked}
+            </button>
+          ) : (
+            <span
+              className={`sync-indicator sync-${syncStatus}`}
+              title={text.sharedBoard}
+              aria-live="polite"
+            >
+              <i aria-hidden="true" />
+              {syncStatus === "saved"
+                ? text.cloudSaved
+                : syncStatus === "offline"
+                  ? text.cloudOffline
+                  : text.cloudSyncing}
+            </span>
+          )}
           <button
             className="language-button"
             type="button"
@@ -1454,6 +1575,60 @@ export default function Home() {
         <span aria-hidden="true">•</span>
         <span>{text.footer}</span>
       </footer>
+
+      {signInOpen ? (
+        <div
+          className="settings-backdrop"
+          role="presentation"
+          onMouseDown={() => setSignInOpen(false)}
+        >
+          <section
+            className="settings-dialog sign-in-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sign-in-title"
+            dir={direction}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button
+              className="settings-close"
+              type="button"
+              aria-label={text.closeSignIn}
+              onClick={() => setSignInOpen(false)}
+            >
+              ×
+            </button>
+            <h2 id="sign-in-title">{text.signInTitle}</h2>
+            <p>{signInRefused ? text.signInRefused : text.signInDescription}</p>
+            <div className="settings-form-block">
+              <form className="add-goal-form" onSubmit={submitPin}>
+                <div className="goal-name-field">
+                  <label htmlFor="team-pin">{text.teamPin}</label>
+                  <input
+                    id="team-pin"
+                    type="password"
+                    value={pinInput}
+                    onChange={(event) => {
+                      setPinInput(event.target.value);
+                      setPinError(false);
+                    }}
+                    autoComplete="current-password"
+                    autoFocus
+                  />
+                </div>
+                {pinError ? (
+                  <p className="sign-in-error" role="alert">
+                    {text.wrongPin}
+                  </p>
+                ) : null}
+                <button type="submit" disabled={!pinInput.trim() || pinBusy}>
+                  {text.signIn}
+                </button>
+              </form>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {settingsOpen ? (
         <div
